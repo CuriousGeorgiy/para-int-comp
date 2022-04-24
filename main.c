@@ -15,6 +15,8 @@
 #define CPU_CORES_CNT 16
 #define CPU_CPUS_CNT (CPU_CORES_CNT * CPU_SOCKS_CNT * 2)
 
+#define MAX(a, b) ((b) < (a) ? (a) : (b))
+
 static int cpu_map[CPU_SOCKS_CNT][CPU_CORES_CNT][CPU_CPUS_CNT];
 static int cpu_cnts[CPU_SOCKS_CNT][CPU_CORES_CNT] = {};
 
@@ -136,7 +138,8 @@ main(int argc, const char *const *argv) {
   }
 
   struct worker_state *worker_states =
-      aligned_alloc(CACHE_LINE_SZ, n_workers * sizeof(*worker_states));
+      aligned_alloc(CACHE_LINE_SZ,
+                    MAX(n_workers, cpus_cnt) * sizeof(*worker_states));
   if (worker_states == NULL) {
     perror("aligned_alloc failed");
     return EXIT_FAILURE;
@@ -144,7 +147,7 @@ main(int argc, const char *const *argv) {
 
   real part_sz = domain_sz / (real)n_workers;
   assert(part_sz > 0);
-  for (size_t i = 0; i < n_workers; ++i) {
+  for (size_t i = 0; i < MAX(n_workers, cpus_cnt); ++i) {
     worker_states[i].begin = part_sz * (real)i;
     worker_states[i].end = part_sz * (real)(i + 1);
   }
@@ -162,7 +165,7 @@ main(int argc, const char *const *argv) {
   }
 #endif
 
-  for (size_t i = 0; i < n_workers; ++i) {
+  for (size_t i = 0; i < MAX(n_workers, cpus_cnt); ++i) {
     CPU_SET(cpus[i % cpus_cnt], &cpu_set);
     rc = pthread_attr_setaffinity_np(&attr, CPU_SETSIZE, &cpu_set);
 #if 0
