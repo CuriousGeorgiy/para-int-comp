@@ -171,10 +171,6 @@ main(int argc, const char *const *argv) {
     }
   }
 
-  if (n_workers == 1) {
-    for (volatile size_t i = 0; i < 1ull << 29; ++i) ;
-  }
-
   printf("Parallel result: %g\n", int_sum);
 }
 
