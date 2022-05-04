@@ -2,12 +2,11 @@
 #include <errno.h>
 #include <math.h>
 #include <pthread.h>
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <unistd.h>
 
 #define CACHE_LINE_SZ 64
 
@@ -17,8 +16,10 @@
 
 #define MAX(a, b) ((b) < (a) ? (a) : (b))
 
+#if 0
 static int cpu_map[CPU_SOCKS_CNT][CPU_CORES_CNT][CPU_CPUS_CNT];
 static int cpu_cnts[CPU_SOCKS_CNT][CPU_CORES_CNT];
+#endif
 
 typedef double real;
 static_assert(sizeof(real) <= sizeof(uintptr_t),
@@ -28,10 +29,11 @@ struct worker_state {
   pthread_t id;
   real begin;
   real end;
+  real sum;
 } __attribute__((aligned(CACHE_LINE_SZ)));
 
-#define DX 1e-6
-static const real domain_sz = 2e2;
+#define DX 1e-7
+static const real domain_sz = 10;
 
 static void *
 worker(void *state);
@@ -49,7 +51,7 @@ main(int argc, const char *const *argv) {
 
   if (argc != 1) {
     printf("USAGE: para-int-comp <number of threads>\n");
-    return EXIT_SUCCESS;
+    return EXIT_FAILURE;
   }
 
   errno = 0;
@@ -59,6 +61,7 @@ main(int argc, const char *const *argv) {
     return EXIT_FAILURE;
   }
 
+#if 0
   FILE *lscpu = popen("lscpu -p=socket,core,cpu -y", "r");
   if (lscpu == NULL) {
     perror("popen failed");
@@ -132,6 +135,9 @@ main(int argc, const char *const *argv) {
       }
     } while (prev_cpus_cnt != cpus_cnt);
   }
+#endif
+
+  long cpus_cnt = sysconf(_SC_NPROCESSORS_ONLN);
 
   struct worker_state *worker_states =
       aligned_alloc(CACHE_LINE_SZ,
@@ -155,37 +161,34 @@ main(int argc, const char *const *argv) {
   pthread_attr_init(&attr);
 
   for (size_t i = 0; i < MAX(n_workers, cpus_cnt); ++i) {
-    CPU_SET(cpus[i % cpus_cnt], &cpu_set);
+    CPU_SET(i + 1 % cpus_cnt, &cpu_set);//CPU_SET(cpus[i % cpus_cnt], &cpu_set);
     pthread_attr_setaffinity_np(&attr, CPU_SETSIZE, &cpu_set);
-    CPU_CLR(cpus[i % cpus_cnt], &cpu_set);
-
-    pthread_create(&worker_states[i].id, &attr, worker, &worker_states[i]);
-  }
-
-  real int_sum = 0;
-  for (size_t i = 0; i < MAX(n_workers, cpus_cnt); ++i) {
-    real partial_int_sum;
-    pthread_join(worker_states[i].id, (void **)&partial_int_sum);
-    if (i < n_workers) {
-      int_sum += partial_int_sum;
+    CPU_CLR(i  + 1% cpus_cnt, &cpu_set);//CPU_CLR(cpus[i % cpus_cnt], &cpu_set);
+    int rc =
+        pthread_create(&worker_states[i].id, &attr, worker, &worker_states[i]);
+    if (rc != 0) {
+      perror("pthread_create failed");
+      return EXIT_FAILURE;
     }
   }
 
-  printf("Parallel result: %g\n", int_sum);
+  for (size_t i = 0; i < n_workers; ++i) {
+    pthread_join(worker_states[i].id, NULL);
+  }
 }
 
 void *
 worker(void *state) {
   struct worker_state *worker_state = state;
-  real int_sum =
+  worker_state->sum =
       comp_int_sum_over_range(worker_state->begin, worker_state->end);
-  return (void *)*(uintptr_t *)&int_sum;
+  return NULL;
 }
 
 real
 comp_int_sum_over_range(real begin, real end) {
   real int_sum = 0;
-  for (real x = begin; x < end; x += DX) {
+  for (real x = begin; x <= end; x += DX) {
     int_sum += integrand(x) * DX;
   }
   return int_sum;
@@ -193,5 +196,5 @@ comp_int_sum_over_range(real begin, real end) {
 
 real
 integrand(real x) {
-  return x * cos(atan(x));
+  return cos(pow(x, 5) * tan(atan(x)));
 }
