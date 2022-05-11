@@ -8,11 +8,11 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#define CACHE_LINE_SZ 64
-
+#if 0
 #define CPU_SOCKS_CNT 64
 #define CPU_CORES_CNT 16
 #define CPU_CPUS_CNT (CPU_CORES_CNT * CPU_SOCKS_CNT * 2)
+#endif
 
 #define MAX(a, b) ((b) < (a) ? (a) : (b))
 
@@ -22,15 +22,13 @@ static int cpu_cnts[CPU_SOCKS_CNT][CPU_CORES_CNT];
 #endif
 
 typedef double real;
-static_assert(sizeof(real) <= sizeof(uintptr_t),
-              "real must fit into function integer register");
 
 struct worker_state {
   pthread_t id;
   real begin;
   real end;
   real sum;
-} __attribute__((aligned(CACHE_LINE_SZ)));
+};
 
 #define DX 1e-7
 static const real domain_sz = 30;
@@ -138,9 +136,10 @@ main(int argc, const char *const *argv) {
 #endif
 
   long cpus_cnt = sysconf(_SC_NPROCESSORS_ONLN);
+  long cpu_cache_line_sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
 
   struct worker_state *worker_states =
-      aligned_alloc(CACHE_LINE_SZ,
+      aligned_alloc(cpu_cache_line_sz,
                     MAX(n_workers, cpus_cnt) * sizeof(*worker_states));
   if (worker_states == NULL) {
     perror("aligned_alloc failed");
