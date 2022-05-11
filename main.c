@@ -161,12 +161,13 @@ main(int argc, const char *const *argv) {
   pthread_attr_init(&attr);
 
   for (size_t i = 0; i < MAX(n_workers, cpus_cnt); ++i) {
-    CPU_SET(i + 1 % cpus_cnt, &cpu_set);//CPU_SET(cpus[i % cpus_cnt], &cpu_set);
+    CPU_SET((i + 1) % cpus_cnt, &cpu_set);//CPU_SET(cpus[i % cpus_cnt], &cpu_set);
     pthread_attr_setaffinity_np(&attr, CPU_SETSIZE, &cpu_set);
-    CPU_CLR(i  + 1% cpus_cnt, &cpu_set);//CPU_CLR(cpus[i % cpus_cnt], &cpu_set);
+    CPU_CLR((i + 1) % cpus_cnt, &cpu_set);//CPU_CLR(cpus[i % cpus_cnt], &cpu_set);
     int rc =
         pthread_create(&worker_states[i].id, &attr, worker, &worker_states[i]);
     if (rc != 0) {
+      errno = rc;
       perror("pthread_create failed");
       return EXIT_FAILURE;
     }
