@@ -24,7 +24,6 @@ static int cpu_cnts[CPU_SOCKS_CNT][CPU_CORES_CNT];
 typedef double real;
 
 struct worker_state {
-  pthread_t id;
   size_t core;
   real begin;
   real end;
@@ -32,7 +31,7 @@ struct worker_state {
 };
 
 #define DX 1e-7
-static const real domain_sz = 30;
+static const real domain_sz = 10;
 
 static void *
 worker(void *state);
@@ -142,7 +141,12 @@ main(int argc, const char *const *argv) {
   struct worker_state *worker_states =
       malloc(MAX(n_workers, cpus_cnt) * (sizeof(worker_states[0]) / cpu_cache_line_sz + 1) * cpu_cache_line_sz);
   if (worker_states == NULL) {
-    perror("aligned_alloc failed");
+    perror("malloc failed");
+    return EXIT_FAILURE;
+  }
+  pthread_t *tids = malloc(MAX(n_workers, cpus_cnt) * (sizeof(tids[0]) / cpu_cache_line_sz + 1) * cpu_cache_line_sz);
+  if (tids == NULL) {
+    perror("malloc failed");
     return EXIT_FAILURE;
   }
 
@@ -157,7 +161,7 @@ main(int argc, const char *const *argv) {
 
   for (size_t i = 0; i < MAX(n_workers, cpus_cnt); ++i) {
     int rc =
-        pthread_create(&worker_states[i].id, NULL, worker, &worker_states[i]);
+        pthread_create(&tids[i], NULL, worker, &worker_states[i]);
     if (rc != 0) {
       errno = rc;
       perror("pthread_create failed");
@@ -166,7 +170,7 @@ main(int argc, const char *const *argv) {
   }
 
   for (size_t i = 0; i < n_workers; ++i) {
-    pthread_join(worker_states[i].id, NULL);
+    pthread_join(tids[i], NULL);
   }
 }
 
@@ -176,7 +180,7 @@ worker(void *state) {
   cpu_set_t cpu_set;
   CPU_ZERO(&cpu_set);
   CPU_SET(worker_state->core, &cpu_set);
-  pthread_setaffinity_np(worker_state->id, CPU_SETSIZE, &cpu_set);
+  pthread_setaffinity_np(pthread_self(), CPU_SETSIZE, &cpu_set);
   worker_state->sum =
       comp_int_sum_over_range(worker_state->begin, worker_state->end);
   return NULL;
