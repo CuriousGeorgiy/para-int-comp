@@ -25,6 +25,7 @@ typedef double real;
 
 struct worker_state {
   pthread_t id;
+  size_t core;
   real begin;
   real end;
   real sum;
@@ -139,8 +140,7 @@ main(int argc, const char *const *argv) {
   long cpu_cache_line_sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
 
   struct worker_state *worker_states =
-      aligned_alloc(cpu_cache_line_sz,
-                    MAX(n_workers, cpus_cnt) * sizeof(*worker_states));
+      malloc(MAX(n_workers, cpus_cnt) * (sizeof(worker_states[0]) / cpu_cache_line_sz + 1) * cpu_cache_line_sz);
   if (worker_states == NULL) {
     perror("aligned_alloc failed");
     return EXIT_FAILURE;
@@ -149,22 +149,15 @@ main(int argc, const char *const *argv) {
   real part_sz = domain_sz / (real)n_workers;
   assert(part_sz > 0);
   for (size_t i = 0; i < MAX(n_workers, cpus_cnt); ++i) {
+    worker_states[i].core = i % cpus_cnt;
     worker_states[i].begin = part_sz * (real)i;
     worker_states[i].end = part_sz * (real)(i + 1);
   }
   worker_states[n_workers - 1].end = domain_sz;
 
-  cpu_set_t cpu_set;
-  CPU_ZERO(&cpu_set);
-  pthread_attr_t attr;
-  pthread_attr_init(&attr);
-
   for (size_t i = 0; i < MAX(n_workers, cpus_cnt); ++i) {
-    CPU_SET((i + 1) % cpus_cnt, &cpu_set);//CPU_SET(cpus[i % cpus_cnt], &cpu_set);
-    pthread_attr_setaffinity_np(&attr, CPU_SETSIZE, &cpu_set);
-    CPU_CLR((i + 1) % cpus_cnt, &cpu_set);//CPU_CLR(cpus[i % cpus_cnt], &cpu_set);
     int rc =
-        pthread_create(&worker_states[i].id, &attr, worker, &worker_states[i]);
+        pthread_create(&worker_states[i].id, NULL, worker, &worker_states[i]);
     if (rc != 0) {
       errno = rc;
       perror("pthread_create failed");
@@ -180,6 +173,10 @@ main(int argc, const char *const *argv) {
 void *
 worker(void *state) {
   struct worker_state *worker_state = state;
+  cpu_set_t cpu_set;
+  CPU_ZERO(&cpu_set);
+  CPU_SET(worker_state->core, &cpu_set);
+  pthread_setaffinity_np(worker_state->id, CPU_SETSIZE, &cpu_set);
   worker_state->sum =
       comp_int_sum_over_range(worker_state->begin, worker_state->end);
   return NULL;
