@@ -33,7 +33,7 @@ struct worker_state {
 } __attribute__((aligned(CACHE_LINE_SZ)));
 
 #define DX 1e-7
-static const real domain_sz = 10;
+static const real domain_sz = 30;
 
 static void *
 worker(void *state);
