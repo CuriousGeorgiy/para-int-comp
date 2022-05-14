@@ -31,7 +31,7 @@ struct worker_state {
 };
 
 #define DX 1e-7
-static const real domain_sz = 10;
+static const real domain_sz = 5;
 
 static void *
 worker(void *state);
@@ -138,13 +138,15 @@ main(int argc, const char *const *argv) {
   long cpus_cnt = sysconf(_SC_NPROCESSORS_ONLN);
   long cpu_cache_line_sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
 
-  struct worker_state *worker_states =
-      malloc(MAX(n_workers, cpus_cnt) * (sizeof(worker_states[0]) / cpu_cache_line_sz + 1) * cpu_cache_line_sz);
+  size_t n_threads = MAX(n_workers, cpus_cnt);
+  size_t worker_state_sz =
+      (sizeof(struct worker_state) / cpu_cache_line_sz + 1) * cpu_cache_line_sz;
+  void *worker_states = malloc(n_threads * worker_state_sz);
   if (worker_states == NULL) {
     perror("malloc failed");
     return EXIT_FAILURE;
   }
-  pthread_t *tids = malloc(MAX(n_workers, cpus_cnt) * (sizeof(tids[0]) / cpu_cache_line_sz + 1) * cpu_cache_line_sz);
+  pthread_t *tids = malloc(n_threads * sizeof(tids[0]));
   if (tids == NULL) {
     perror("malloc failed");
     return EXIT_FAILURE;
@@ -152,16 +154,28 @@ main(int argc, const char *const *argv) {
 
   real part_sz = domain_sz / (real)n_workers;
   assert(part_sz > 0);
-  for (size_t i = 0; i < MAX(n_workers, cpus_cnt); ++i) {
-    worker_states[i].core = i % cpus_cnt;
-    worker_states[i].begin = part_sz * (real)i;
-    worker_states[i].end = part_sz * (real)(i + 1);
+  for (size_t i = 0; i < n_threads; ++i) {
+    *(struct worker_state *)(worker_states + i * worker_state_sz) =
+        (struct worker_state){
+            .core = (i < n_workers) ? i % cpus_cnt : -1,
+            .begin = (i < n_workers) ? part_sz * (real)i : 0,
+            .end = (i < n_workers) ? part_sz * (real)(i + 1) : part_sz,
+        };
   }
-  worker_states[n_workers - 1].end = domain_sz;
-
-  for (size_t i = 0; i < MAX(n_workers, cpus_cnt); ++i) {
-    int rc =
-        pthread_create(&tids[i], NULL, worker, &worker_states[i]);
+#if 0
+  for (size_t i = n_workers; i < cpus_cnt; ++i) {
+    struct worker_state *copy = (struct worker_state *)(worker_states + (i % n_workers) * worker_state_sz);
+    *(struct worker_state *)(worker_states + i * worker_state_sz) =
+        (struct worker_state){
+            .core = i % cpus_cnt,
+            .begin = copy->begin,
+            .end = copy->end,
+        };
+  }
+#endif
+  for (size_t i = 0; i < n_threads; ++i) {
+    int rc = pthread_create(&tids[i], NULL, worker,
+                            worker_states + i * worker_state_sz);
     if (rc != 0) {
       errno = rc;
       perror("pthread_create failed");
@@ -169,7 +183,7 @@ main(int argc, const char *const *argv) {
     }
   }
 
-  for (size_t i = 0; i < n_workers; ++i) {
+  for (size_t i = 0; i < n_threads; ++i) {
     pthread_join(tids[i], NULL);
   }
 }
@@ -177,19 +191,21 @@ main(int argc, const char *const *argv) {
 void *
 worker(void *state) {
   struct worker_state *worker_state = state;
-  cpu_set_t cpu_set;
-  CPU_ZERO(&cpu_set);
-  CPU_SET(worker_state->core, &cpu_set);
-  pthread_setaffinity_np(pthread_self(), CPU_SETSIZE, &cpu_set);
+  if (worker_state->core != -1) {
+    cpu_set_t cpu_set;
+    CPU_ZERO(&cpu_set);
+    CPU_SET(worker_state->core, &cpu_set);
+    pthread_setaffinity_np(pthread_self(), CPU_SETSIZE, &cpu_set);
+  }
   worker_state->sum =
-      comp_int_sum_over_range(worker_state->begin, worker_state->end);
+    comp_int_sum_over_range(worker_state->begin, worker_state->end);
   return NULL;
 }
 
 real
 comp_int_sum_over_range(real begin, real end) {
   real int_sum = 0;
-  for (real x = begin; x <= end; x += DX) {
+  for (real x = begin; x < end; x += DX) {
     int_sum += integrand(x) * DX;
   }
   return int_sum;
@@ -197,5 +213,5 @@ comp_int_sum_over_range(real begin, real end) {
 
 real
 integrand(real x) {
-  return cos(pow(x, 5) * tan(atan(x)));
+  return cos(pow(x, 5) * sin(cos(x)));
 }
